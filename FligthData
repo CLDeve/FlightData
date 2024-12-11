@@ -1,0 +1,97 @@
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+import requests
+
+# API Configuration
+API_KEY = '56e9c3-1bef36'  # Your Aviation Edge API key
+BASE_URL = 'https://aviation-edge.com/v2/public/timetable'
+
+# Function to fetch all departure flight data from the API
+def fetch_all_departures(departure_airport="SIN"):
+    """
+    Fetch all departure flights from the Aviation Edge API for the given airport.
+
+    Args:
+        departure_airport (str): IATA code for the departure airport (default: "SIN").
+
+    Returns:
+        pd.DataFrame: DataFrame containing all departure flight data.
+    """
+    params = {
+        "key": API_KEY,
+        "iataCode": departure_airport,
+        "type": "departure"  # Fetch departure data
+    }
+    try:
+        # API request
+        response = requests.get(BASE_URL, params=params)
+        response.raise_for_status()
+        flights = response.json()
+
+        # Parse data into a list of dictionaries
+        data = []
+        for flight in flights:
+            data.append({
+                "Flight Number": flight.get("flight", {}).get("iataNumber", "N/A"),
+                "Airline": flight.get("airline", {}).get("name", "N/A"),
+                "Destination": flight.get("arrival", {}).get("iataCode", "N/A"),
+                "Scheduled Departure Time": flight.get("departure", {}).get("scheduledTime", "N/A"),
+                "Status": flight.get("status", "N/A"),
+            })
+
+        # Convert to DataFrame
+        df = pd.DataFrame(data)
+        return df
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching data: {e}")
+        return pd.DataFrame()
+
+# Function to convert DataFrame to Excel for download
+def convert_df_to_excel(df):
+    """
+    Convert a DataFrame to an Excel file for download.
+
+    Args:
+        df (pd.DataFrame): DataFrame to convert.
+
+    Returns:
+        bytes: The Excel file as bytes.
+    """
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Departures')
+    return output.getvalue()
+
+# Streamlit Interface
+st.title("Flight Timetable Downloader")
+
+# Input for departure airport
+departure_airport = st.text_input("Enter the departure airport IATA code (e.g., SIN):", value="SIN")
+
+# Fetch and download data
+if st.button("Fetch and Download All Departures"):
+    if departure_airport.strip():
+        st.write(f"Fetching all departures for airport: {departure_airport}...")
+        
+        # Fetch all departure data
+        departures_df = fetch_all_departures(departure_airport.strip())
+
+        if not departures_df.empty:
+            st.dataframe(departures_df)
+
+            # Convert to Excel
+            excel_data = convert_df_to_excel(departures_df)
+
+            # Download button
+            st.download_button(
+                label="Download All Departures as Excel",
+                data=excel_data,
+                file_name=f"{departure_airport}_departures.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("No departure data found for the specified airport.")
+    else:
+        st.error("Please enter a valid IATA code.")
